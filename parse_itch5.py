@@ -2,6 +2,63 @@ import struct
 from typing import Tuple
 
 
+def parse_stock_directory(
+    a: bytes,
+) -> Tuple[
+    int,
+    int,
+    bytes,
+    bytes,
+    str,
+    str,
+    int,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    int,
+    str,
+]:
+    """
+    Parse a stock directory message.
+
+    This function unpacks a stock directory message into its constituent components.
+    The expected message format includes 17 elements:
+    1. Stock locate
+    2. Tracking number
+    3. Timestamp
+    4. Stock symbol
+    5. Market category
+    6. Financial status indicator
+    7. Round lot size
+    8. Round lots only
+    9. Issue classification
+    10. Issue subtype
+    11. Authenticity
+    12. Short sale threshold indicator
+    13. IPO flag
+    14. LULD reference price tier
+    15. ETP flag
+    16. ETP leverage factor
+    17. Inverse indicator
+
+    Parameters:
+    a (bytes): The stock directory message in bytes to be parsed.
+
+    Returns:
+    Tuple[int, int, bytes, bytes, str, str, int, str, str, str, str, str, str, str, str, int, str]:
+    A tuple containing the parsed values.
+    """
+    m = struct.unpack("!HH6s8sccIcc2scccccIc", a)
+    m = list(m)
+    m[3] = m[3].decode().strip()
+    return tuple(m)
+
+
 # Message Type A
 def parse_add_order(a: bytes) -> Tuple[int, int, int, int, str, int, str, float]:
     """

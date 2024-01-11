@@ -137,15 +137,16 @@ class OrderBook:
             order = self.orders[order_ref_number]
             old_order_key = (order.price, order.timestamp, order_ref_number)
             order.update_order(None, new_shares, new_price)
-            new_order_key = (order.price, order.timestamp, order_ref_number)
-            if order.buy_sell_indicator == "B":
-                if old_order_key in self.buy_orders:
-                    del self.buy_orders[old_order_key]
-                self.buy_orders[new_order_key] = order
-            else:
-                if old_order_key in self.sell_orders:
-                    del self.sell_orders[old_order_key]
-                self.sell_orders[new_order_key] = order
+            if old_order_key[0] != order.price:
+                new_order_key = (order.price, order.timestamp, order_ref_number)
+                if order.buy_sell_indicator == "B":
+                    if old_order_key in self.buy_orders:
+                        del self.buy_orders[old_order_key]
+                    self.buy_orders[new_order_key] = order
+                else:
+                    if old_order_key in self.sell_orders:
+                        del self.sell_orders[old_order_key]
+                    self.sell_orders[new_order_key] = order
         self.record_state(new_timestamp)
 
     def remove_order(self, order_ref_number: int) -> None:
