@@ -23,7 +23,6 @@ class Order:
         shares (int): Number of shares in the order.
         price (float): Price of the order.
         """
-        self.original_timestamp = timestamp
         self.timestamp = timestamp
         self.order_ref_number = order_ref_number
         self.buy_sell_indicator = buy_sell_indicator
@@ -53,7 +52,7 @@ class Order:
 
 
 class OrderBook:
-    def __init__(self, stock_symbol: str, depth: int = 5) -> None:
+    def __init__(self, stock_symbol: str, depth: int = 3) -> None:
         """
         Initializes an OrderBook for a specific stock.
 
@@ -93,9 +92,10 @@ class OrderBook:
         """
         levels = []
         for (price, _, _), order in orders.items():
+            actual_price = -price if price < 0 else price  # Adjust price for buy orders
             if len(levels) < depth:
-                if len(levels) == 0 or levels[-1][0] != price:
-                    levels.append((price, order.shares))
+                if len(levels) == 0 or levels[-1][0] != actual_price:
+                    levels.append((actual_price, order.shares))
                 else:
                     levels[-1] = (levels[-1][0], levels[-1][1] + order.shares)
             else:
@@ -110,44 +110,13 @@ class OrderBook:
         order (Order): The order to be added.
         """
         self.orders[order.order_ref_number] = order
-        order_key = (order.price, order.original_timestamp, order.order_ref_number)
+
         if order.buy_sell_indicator == "B":
+            order_key = (-order.price, order.timestamp, order.order_ref_number)
             self.buy_orders[order_key] = order
         else:
+            order_key = (order.price, order.timestamp, order.order_ref_number)
             self.sell_orders[order_key] = order
-        self.record_state(order.timestamp)
-
-    def update_order(
-        self,
-        order_ref_number: int,
-        new_timestamp: int,
-        new_shares: Optional[int] = None,
-        new_price: Optional[float] = None,
-    ) -> None:
-        """
-        Updates an existing order in the order book.
-
-        Parameters:
-        order_ref_number (int): Reference number of the order.
-        new_timestamp (int, optional): Updated timestamp.
-        new_shares (int, optional): Updated number of shares.
-        new_price (float, optional): Updated price.
-        """
-        if order_ref_number in self.orders:
-            order = self.orders[order_ref_number]
-            old_order_key = (order.price, order.timestamp, order_ref_number)
-            order.update_order(None, new_shares, new_price)
-            if old_order_key[0] != order.price:
-                new_order_key = (order.price, order.timestamp, order_ref_number)
-                if order.buy_sell_indicator == "B":
-                    if old_order_key in self.buy_orders:
-                        del self.buy_orders[old_order_key]
-                    self.buy_orders[new_order_key] = order
-                else:
-                    if old_order_key in self.sell_orders:
-                        del self.sell_orders[old_order_key]
-                    self.sell_orders[new_order_key] = order
-        self.record_state(new_timestamp)
 
     def remove_order(self, order_ref_number: int) -> None:
         """
@@ -158,12 +127,12 @@ class OrderBook:
         """
         if order_ref_number in self.orders:
             order = self.orders.pop(order_ref_number)
-            order_key = (order.price, order.timestamp, order_ref_number)
             if order.buy_sell_indicator == "B":
+                order_key = (-order.price, order.timestamp, order_ref_number)
                 self.buy_orders.pop(order_key, None)
             else:
+                order_key = (order.price, order.timestamp, order_ref_number)
                 self.sell_orders.pop(order_key, None)
-        self.record_state(order.timestamp)
 
     def process_trade(
         self,
@@ -174,7 +143,7 @@ class OrderBook:
         printable: Optional[bool] = True,
     ) -> None:
         """
-        Processes a trade and updates the order book.
+        Processes an trade execution and updates the order book.
 
         Parameters:
         order_ref_number (int): Reference number of the order involved in the trade.
@@ -186,37 +155,30 @@ class OrderBook:
         if order_ref_number in self.orders:
             order = self.orders[order_ref_number]
             new_shares = order.shares - shares
-            if price is None:
-                price = order.price
             if new_shares <= 0:
                 self.remove_order(order_ref_number)
             else:
-                self.update_order(order_ref_number, timestamp, new_shares, price)
+                order.update_order(None, new_shares, None)
             if printable:
-                self.record_trade(
-                    timestamp,
-                    order_ref_number,
-                )
+                self.record_trade(timestamp, order.buy_sell_indicator, shares, price)
 
     def record_trade(
         self,
         timestamp: int,
-        order_ref_number: int,
+        buy_sell_indicator: str,
         shares: int,
         price: float,
-        buy_sell_indicator: str,
     ) -> None:
         """
         Records a trade in the order book with a consistent data order.
 
         Parameters:
         timestamp (int): Trade timestamp.
-        order_ref_number (int): Reference number of the order.
         buy_sell_indicator (str): "B" if buy order, "S" if sell order.
         price (float): Trade price.
         shares (int): Number of shares traded.
         """
-        trade = (timestamp, order_ref_number, buy_sell_indicator, shares, price)
+        trade = (timestamp, buy_sell_indicator, shares, price)
         self.trades.append(trade)
 
     def record_cross_trade(self, timestamp: int, price: float, shares: int) -> None:
@@ -242,17 +204,18 @@ class OrderBook:
         sell_levels = self._accumulate_order_levels(self.sell_orders, self.depth)
 
         state_record = [timestamp]
-        for i in range(self.depth):
-            state_record.extend(
-                [
-                    buy_levels[i][0] if i < len(buy_levels) else None,
-                    buy_levels[i][1] if i < len(buy_levels) else None,
-                    sell_levels[i][0] if i < len(sell_levels) else None,
-                    sell_levels[i][1] if i < len(sell_levels) else None,
-                ]
-            )
+        if len(buy_levels) >= self.depth and len(sell_levels) >= self.depth:
+            for i in range(self.depth):
+                state_record.extend(
+                    [
+                        buy_levels[i][0] if i < len(buy_levels) else None,
+                        buy_levels[i][1] if i < len(buy_levels) else None,
+                        sell_levels[i][0] if i < len(sell_levels) else None,
+                        sell_levels[i][1] if i < len(sell_levels) else None,
+                    ]
+                )
 
-        self.order_book_history.append(state_record)
+            self.order_book_history.append(state_record)
 
     def export_to_csv(self, base_directory: Optional[str] = "output") -> None:
         """
@@ -290,15 +253,7 @@ class OrderBook:
             f"{directory}/{self.stock_symbol}_trades.csv", "w", newline=""
         ) as file:
             writer = csv.writer(file)
-            writer.writerow(
-                [
-                    "timestamp",
-                    "order_ref_number",
-                    "buy_sell_indicator",
-                    "price",
-                    "shares",
-                ]
-            )
+            writer.writerow(["timestamp", "buy_sell_indicator", "price", "shares"])
             for trade in self.trades:
                 writer.writerow(trade)
 

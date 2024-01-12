@@ -5,11 +5,10 @@ from orderbook import OrderBook, Order
 
 
 def reconstruct_orderbook(path, selected_symbols):
+    # Stock locate for the selected symbols found through the stock directory message
+    selected_stocks = set()
     # Create dictionary of order books, which will be keyed by stock locate number
     order_book = {}
-
-    # Stock locate for the selected symbols
-    selected_stocks = []
 
     with open(path, "rb") as binary:
         total_size = os.path.getsize(path)
@@ -25,7 +24,9 @@ def reconstruct_orderbook(path, selected_symbols):
                 a = binary.read(38)  # Stock Directory Message
                 m = itch.parse_stock_directory(a)
                 if m[3] in selected_symbols:
-                    selected_stocks.append(m[0])
+                    selected_stocks.add(m[0])
+                    order_book[m[0]] = OrderBook(m[3])
+                    # print("Symbol:", m[3], "Locate: ", m[0])
             elif message_type == b"H":
                 a = binary.read(24)  # Stock Trading Action Message
             elif message_type == b"Y":
@@ -46,64 +47,60 @@ def reconstruct_orderbook(path, selected_symbols):
                 a = binary.read(35)  # Add Order Message
                 m = itch.parse_add_order(a)
                 if m[0] in selected_stocks:
-                    # If the order book for this stock symbol doesn't exist, create it
-                    if m[0] not in order_book:
-                        order_book[m[0]] = OrderBook(m[6])
                     order = Order(m[2], m[3], m[4], m[5], m[7])
                     order_book[m[0]].add_order(order)
+                    order_book[m[0]].record_state(m[2])
             elif message_type == b"F":
                 a = binary.read(39)  # Add Order with MPID Message
                 m = itch.parse_add_order_with_mpid(a)
                 if m[0] in selected_stocks:
-                    if m[0] not in order_book:
-                        order_book[m[0]] = OrderBook(m[6])
                     order = Order(m[2], m[3], m[4], m[5], m[7])
                     order_book[m[0]].add_order(order)
+                    order_book[m[0]].record_state(m[2])
             elif message_type == b"E":
                 a = binary.read(30)  # Order Executed Message
                 m = itch.parse_order_executed(a)
                 if m[0] in selected_stocks:
-                    order_book[m[0]].process_trade(m[3], m[2], m[4], None, True)
+                    order_book[m[0]].process_trade(m[2], m[3], m[4])
+                    order_book[m[0]].record_state(m[2])
             elif message_type == b"C":
                 a = binary.read(35)  # Order Executed with Price Message
                 m = itch.parse_order_executed_price(a)
                 if m[0] in selected_stocks:
-                    order_book[m[0]].process_trade(m[3], m[2], m[4], m[7], m[6] == "Y")
+                    order_book[m[0]].process_trade(m[2], m[3], m[4], m[7], m[6] == "Y")
+                    order_book[m[0]].record_state(m[2])
             elif message_type == b"X":
                 a = binary.read(22)  # Order Cancel Message
                 m = itch.parse_order_cancel(a)
                 if m[0] in selected_stocks:
                     order = order_book[m[0]].orders[m[3]]
-                    new_shares = order.shares - m[4]
-                    order_book[m[0]].update_order(m[3], m[2], new_shares, order.price)
+                    order.update_order(None, order.shares - m[4], None)
+                    order_book[m[0]].record_state(m[2])
             elif message_type == b"D":
                 a = binary.read(18)  # Order Delete Message
                 m = itch.parse_order_delete(a)
                 if m[0] in selected_stocks:
                     order_book[m[0]].remove_order(m[3])
+                    order_book[m[0]].record_state(m[2])
             elif message_type == b"U":
                 a = binary.read(34)  # Order Replace Message
                 m = itch.parse_order_replace(a)
                 if m[0] in selected_stocks:
-                    original_order_ref = m[3]
-                    original_order = order_book[m[0]].orders[original_order_ref]
-                    buy_sell_indicator = original_order.buy_sell_indicator
-                    order_book[m[0]].remove_order(original_order_ref)
-                    new_order = Order(m[2], m[4], buy_sell_indicator, m[5], m[6])
-                    order_book[m[0]].add_order(new_order)
+                    og = order_book[m[0]].orders[m[3]]
+                    order_book[m[0]].remove_order(og.order_ref_number)
+                    order_book[m[0]].add_order(
+                        Order(m[2], m[4], og.buy_sell_indicator, m[5], m[6])
+                    )
+                    order_book[m[0]].record_state(m[2])
             elif message_type == b"P":
                 a = binary.read(43)  # Trade Message
+                m = itch.parse_trade(a)
                 if m[0] in selected_stocks:
-                    m = itch.parse_trade(a)
-                    if m[0] not in order_book:
-                        order_book[m[0]] = OrderBook(m[6])
-                    order_book[m[0]].record_trade(m[2], m[3], m[4], m[5], m[7])
+                    order_book[m[0]].record_trade(m[2], m[4], m[5], m[7])
             elif message_type == b"Q":
                 a = binary.read(39)  # Cross Trade Message
+                m = itch.parse_cross_trade(a)
                 if m[0] in selected_stocks:
-                    m = itch.parse_cross_trade(a)
-                    if m[0] not in order_book:
-                        order_book[m[0]] = OrderBook(m[4])
                     order_book[m[0]].record_cross_trade(m[2], m[3], m[5])
             elif message_type == b"B":
                 a = binary.read(18)  # NOII Message
@@ -121,6 +118,6 @@ def reconstruct_orderbook(path, selected_symbols):
 
 
 if __name__ == "__main__":
-    filepath = ""
+    filepath = "/Users/bsh/Downloads/01302019.NASDAQ_ITCH50"
     selected_symbols = {"FB", "GOOGL", "AAPL", "MSFT", "AMZN"}
     order_book = reconstruct_orderbook(filepath, selected_symbols)
