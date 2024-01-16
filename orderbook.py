@@ -1,6 +1,7 @@
-import os
 import csv
-from typing import Dict, Tuple, List, Optional
+import os
+from typing import Dict, List, Optional, Tuple
+
 from sortedcontainers import SortedDict
 
 
@@ -14,14 +15,14 @@ class Order:
         price: float,
     ) -> None:
         """
-        Initialize an order with given parameters.
+        Initializes an Order instance.
 
         Parameters:
-        timestamp (int): Timestamp of the order (ns since midnight).
-        order_ref_number (int): Unique reference number of the order.
-        buy_sell_indicator (str): "B" if buy order, "S" if sell order.
-        shares (int): Number of shares in the order.
-        price (float): Price of the order.
+        timestamp (int): Timestamp of the order in nanoseconds since midnight.
+        order_ref_number (int): Unique identifier for the order.
+        buy_sell_indicator (str): Indicates the type of order: 'B' for buy and 'S' for sell.
+        shares (int): The number of shares involved in the order.
+        price (float): The price per share for the order.
         """
         self.timestamp = timestamp
         self.order_ref_number = order_ref_number
@@ -36,12 +37,12 @@ class Order:
         new_price: Optional[float] = None,
     ) -> None:
         """
-        Updates the order with new values if provided.
+        Updates the order's attributes if new values are provided.
 
         Parameters:
-        new_timestamp (int, optional): New timestamp.
-        new_shares (int, optional): New number of shares.
-        new_price (float, optional): New price.
+        new_timestamp (int, optional): New timestamp for the order (nanoseconds since midnight).
+        new_shares (int, optional): Updated number of shares in the order.
+        new_price (float, optional): Updated price per share of the order.
         """
         if new_timestamp is not None:
             self.timestamp = new_timestamp
@@ -61,46 +62,20 @@ class OrderBook:
         depth (int): Depth of price levels to record.
 
         Attributes:
-        orders (Dict[int, Order]): Orders indexed by reference number.
-        buy_orders (SortedDict): Sorted buy orders.
-        sell_orders (SortedDict): Sorted sell orders.
-        trades (List[Tuple[int, int, float, int]]): Completed trades.
-        cross_trades (List[Tuple[int, float, int]]): Completed cross trades.
-        order_book_history (List[List[Optional[float]]]): History of order book states.
+        orders (Dict[int, Order]): Orders indexed by reference number, storing all active orders.
+        buy_orders (SortedDict): Sorted buy orders, with highest bids first.
+        sell_orders (SortedDict): Sorted sell orders, with lowest asks first.
+        trades (List[Tuple[int, int, float]]): Completed trades with form (timestamp, shares, price).
+        order_book_history (List[List[Optional[float]]]): Historical snapshots of the order book state,
+            each including order levels up to the specified depth.
         """
         self.stock_symbol = stock_symbol
         self.depth = depth
         self.orders: Dict[int, Order] = {}
         self.buy_orders: SortedDict[Tuple[float, int, int], Order] = SortedDict()
         self.sell_orders: SortedDict[Tuple[float, int, int], Order] = SortedDict()
-        self.trades: List[Tuple[int, int, float, int]] = []
-        self.cross_trades: List[Tuple[int, float, int]] = []
+        self.trades: List[Tuple[int, int, float]] = []
         self.order_book_history: List[Tuple[Optional[float]]] = []
-
-    def _accumulate_order_levels(
-        self, orders: SortedDict, depth: int
-    ) -> List[Tuple[float, int]]:
-        """
-        Accumulates the top 'depth' levels for given orders.
-
-        Parameters:
-        orders (SortedDict): Sorted dictionary of orders.
-        depth (int): Number of levels to accumulate.
-
-        Returns:
-        List[Tuple[float, int]]: Price and aggregated shares at each level.
-        """
-        levels = []
-        for (price, _, _), order in orders.items():
-            actual_price = -price if price < 0 else price  # Adjust price for buy orders
-            if len(levels) < depth:
-                if len(levels) == 0 or levels[-1][0] != actual_price:
-                    levels.append((actual_price, order.shares))
-                else:
-                    levels[-1] = (levels[-1][0], levels[-1][1] + order.shares)
-            else:
-                break
-        return levels
 
     def add_order(self, order: Order) -> None:
         """
@@ -143,14 +118,14 @@ class OrderBook:
         printable: Optional[bool] = True,
     ) -> None:
         """
-        Processes an trade execution and updates the order book.
+        Processes an executed trade by updating the order book. If new_shares is less than or equal to zero, the order is removed.
 
         Parameters:
+        timestamp (int): Timestamp of the trade.
         order_ref_number (int): Reference number of the order involved in the trade.
-        timestamp (int): Trade timestamp.
-        shares (int): Number of shares traded.
-        price (float): Trade price.
-        printable (bool, optional): Flag to record trade if True.
+        shares (int): Number of shares involved in the trade.
+        price (float, optional): Trade price, defaults to the order's price if not provided.
+        printable (bool, optional): If True, the trade is recorded in the trade history.
         """
         if order_ref_number in self.orders:
             order = self.orders[order_ref_number]
@@ -160,76 +135,81 @@ class OrderBook:
             else:
                 order.update_order(None, new_shares, None)
             if printable:
-                self.record_trade(timestamp, order.buy_sell_indicator, shares, price)
+                price = price if price is not None else order.price
+                self.record_trade(timestamp, shares, price)
+
+    def _accumulate_order_levels(self, orders: SortedDict) -> List[Tuple[float, int]]:
+        """
+        Accumulates the top levels of the order book, up to the orderbook's specified depth.
+
+        Parameters:
+        orders (SortedDict): Sorted dictionary of orders.
+        depth (int): Number of levels to accumulate.
+
+        Returns:
+        List[Tuple[float, int]]: Price and aggregated shares at each level.
+        """
+        levels = []
+        for (price, _, _), order in orders.items():
+            price = abs(price)
+            if len(levels) < self.depth:
+                if len(levels) == 0 or levels[-1][0] != price:
+                    levels.append((price, order.shares))
+                else:
+                    levels[-1] = (levels[-1][0], levels[-1][1] + order.shares)
+            else:
+                break
+        return levels
 
     def record_trade(
         self,
         timestamp: int,
-        buy_sell_indicator: str,
         shares: int,
         price: float,
     ) -> None:
         """
-        Records a trade in the order book with a consistent data order.
+        Records a completed trade in the order book's trade history.
 
         Parameters:
         timestamp (int): Trade timestamp.
-        buy_sell_indicator (str): "B" if buy order, "S" if sell order.
-        price (float): Trade price.
         shares (int): Number of shares traded.
-        """
-        trade = (timestamp, buy_sell_indicator, shares, price)
-        self.trades.append(trade)
-
-    def record_cross_trade(self, timestamp: int, price: float, shares: int) -> None:
-        """
-        Records a cross trade with a consistent data order.
-
-        Parameters:
-        shares (int): Number of shares in the cross trade.
         price (float): Trade price.
-        timestamp (int): Trade timestamp.
         """
-        cross_trade = (timestamp, price, shares)
-        self.cross_trades.append(cross_trade)
+        trade = (timestamp, shares, price)
+        self.trades.append(trade)
 
     def record_state(self, timestamp: int) -> None:
         """
-        Records the current state of the order book.
+        Records the current state of the order book at a specified timestamp up to the orderbook's specified depth.
 
         Parameters:
-        timestamp (int): Timestamp of the order book state.
+        timestamp (int): Timestamp of the trade.
         """
-        buy_levels = self._accumulate_order_levels(self.buy_orders, self.depth)
-        sell_levels = self._accumulate_order_levels(self.sell_orders, self.depth)
+        buy_levels = self._accumulate_order_levels(self.buy_orders)
+        sell_levels = self._accumulate_order_levels(self.sell_orders)
 
         state_record = [timestamp]
-        if len(buy_levels) >= self.depth and len(sell_levels) >= self.depth:
-            for i in range(self.depth):
-                state_record.extend(
-                    [
-                        buy_levels[i][0] if i < len(buy_levels) else None,
-                        buy_levels[i][1] if i < len(buy_levels) else None,
-                        sell_levels[i][0] if i < len(sell_levels) else None,
-                        sell_levels[i][1] if i < len(sell_levels) else None,
-                    ]
-                )
-
-            self.order_book_history.append(state_record)
+        for i in range(self.depth):
+            state_record.extend(
+                [
+                    buy_levels[i][0] if i < len(buy_levels) else None,
+                    buy_levels[i][1] if i < len(buy_levels) else None,
+                    sell_levels[i][0] if i < len(sell_levels) else None,
+                    sell_levels[i][1] if i < len(sell_levels) else None,
+                ]
+            )
+        self.order_book_history.append(state_record)
 
     def export_to_csv(self, base_directory: Optional[str] = "output") -> None:
         """
-        Exports the order book history, trades, and cross trades to CSV files with consistent headers.
-        Creates a folder named after the stock symbol for storing these files.
+        Exports the order book and trade history to seperate CSV files.
 
         Parameters:
         base_directory (str): Base directory path to create the stock symbol folder and save the CSV files.
         """
-        # Create directory for the stock symbol if it doesn't exist
         directory = os.path.join(base_directory, self.stock_symbol)
         os.makedirs(directory, exist_ok=True)
 
-        # Export order book history
         with open(
             f"{directory}/{self.stock_symbol}_order_book_history.csv", "w", newline=""
         ) as file:
@@ -248,20 +228,10 @@ class OrderBook:
             for record in self.order_book_history:
                 writer.writerow(record)
 
-        # Export trades
         with open(
             f"{directory}/{self.stock_symbol}_trades.csv", "w", newline=""
         ) as file:
             writer = csv.writer(file)
-            writer.writerow(["timestamp", "buy_sell_indicator", "price", "shares"])
+            writer.writerow(["timestamp", "shares", "prices"])
             for trade in self.trades:
                 writer.writerow(trade)
-
-        # Export cross trades
-        with open(
-            f"{directory}/{self.stock_symbol}_cross_trades.csv", "w", newline=""
-        ) as file:
-            writer = csv.writer(file)
-            writer.writerow(["timestamp", "shares", "price"])
-            for cross_trade in self.cross_trades:
-                writer.writerow(cross_trade)
