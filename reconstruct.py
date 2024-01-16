@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from typing import Dict
 
@@ -147,7 +149,7 @@ if __name__ == "__main__":
     data_filepath = "/path/to/data/01302019.NASDAQ_ITCH50"
     selected_symbols = {"AAPL", "GOOGL", "MSFT"}
     depth = 5
-    order_book = reconstruct_orderbook(data_filepath, selected_symbols)
+    order_book = reconstruct_orderbook(data_filepath, selected_symbols, depth)
 
     print("Exporting to CSV...")
     for stock in order_book:
